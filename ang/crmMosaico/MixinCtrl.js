@@ -2,12 +2,14 @@
 
   // This provides additional actions for editing a Mosaico mailing.
   // It coexists with crmMailing's EditMailingCtrl.
-  angular.module('crmMosaico').controller('CrmMosaicoMixinCtrl', function CrmMosaicoMixinCtrl($scope, dialogService, crmMosaicoTemplates, crmStatus, CrmMosaicoIframe, $timeout) {
+  angular.module('crmMosaico').controller('CrmMosaicoMixinCtrl', function CrmMosaicoMixinCtrl($scope, dialogService, crmMosaicoTemplates, crmStatus, CrmMosaicoIframe, crmBlocker, $timeout, CrmAutosaveCtrl) {
     // var ts = $scope.ts = CRM.ts(null);
 
     // Main data is in $scope.mailing, $scope.mosaicoCtrl.template
 
     var crmMosaicoIframe = null, activeDialogs = {};
+    var myAutosave = null;
+    var block = $scope.block = crmBlocker();
 
     // Hrm, would like `ng-controller="CrmMosaicoMixinCtrl as mosaicoCtrl`, but that's not working...
     $scope.mosaicoCtrl = {
@@ -34,6 +36,14 @@
           id: mailing.template_options.mosaicoTemplate
         });
         return matches.length > 0 ? matches[0] : null;
+      },
+      syncModel: function(mailing, viewModel) {
+        mailing.body_html = viewModel.exportHTML();
+        mailing.template_options = mailing.template_options || {};
+        // Mosaico exports JSON. Keep their original encoding... or else the loader throws an error.
+        mailing.template_options.mosaicoMetadata = viewModel.exportMetadata();
+        mailing.template_options.mosaicoContent = viewModel.exportJSON();
+        $scope.save();
       },
       // Reset all Mosaico data in a "mailing'.
       reset: function(mailing) {
@@ -70,7 +80,8 @@
               viewModel.metadata.changed = Date.now();
               syncModel(viewModel);
               // TODO: When autosave is better integrated, remove this.
-              $timeout(function(){$scope.save();}, 100);
+              //$timeout(function(){$scope.save();}, 100);
+              $timeout(myAutosave.save);
               crmMosaicoIframe.hide('crmMosaicoEditorDialog');
             },
             test: function(ko, viewModel) {
@@ -122,7 +133,24 @@
         crmMosaicoIframe.destroy();
         crmMosaicoIframe = null;
       }
+      myAutosave.stop;
     });
+    
+    myAutosave = new CrmAutosaveCtrl({
+        save: function() {
+          return block(crmStatus({start: ts('Saving...'), success: ts('Saveddd')}, $scope.mosaicoCtrl.syncModel($scope.mailing, $scope.viewModel)));
+        },
+        saveIf: function() {
+          return true;
+        },
+        model: function() {
+          return [$scope.mailing, $scope.attachments.getAutosaveSignature()];
+        },
+        form: function() {
+          return $scope.crmMailing;
+        }
+    });
+    $timeout(myAutosave.start);
 
   });
 
