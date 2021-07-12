@@ -2,13 +2,14 @@
 
   // This provides additional actions for editing a Mosaico mailing.
   // It coexists with crmMailing's EditMailingCtrl.
-  angular.module('crmMosaico').controller('CrmMosaicoMixinCtrl', function CrmMosaicoMixinCtrl($scope, dialogService, crmMosaicoTemplates, crmStatus, CrmMosaicoIframe, crmBlocker, $timeout, CrmAutosaveCtrl) {
+  angular.module('crmMosaico').controller('CrmMosaicoMixinCtrl', function CrmMosaicoMixinCtrl($scope, dialogService, crmMailingMgr, crmMosaicoTemplates, crmStatus, CrmMosaicoIframe, crmBlocker, $timeout, CrmAutosaveCtrl) {
     // var ts = $scope.ts = CRM.ts(null);
 
     // Main data is in $scope.mailing, $scope.mosaicoCtrl.template
 
     var crmMosaicoIframe = null, activeDialogs = {};
     var myAutosave = null;
+    $scope.viewModel = null;
     var block = $scope.block = crmBlocker();
 
     // Hrm, would like `ng-controller="CrmMosaicoMixinCtrl as mosaicoCtrl`, but that's not working...
@@ -43,7 +44,6 @@
         // Mosaico exports JSON. Keep their original encoding... or else the loader throws an error.
         mailing.template_options.mosaicoMetadata = viewModel.exportMetadata();
         mailing.template_options.mosaicoContent = viewModel.exportJSON();
-        $scope.save();
       },
       // Reset all Mosaico data in a "mailing'.
       reset: function(mailing) {
@@ -62,11 +62,13 @@
         }
 
         function syncModel(viewModel) {
-          mailing.body_html = viewModel.exportHTML();
-          mailing.template_options = mailing.template_options || {};
+          $scope.viewModel = viewModel;
+          $scope.mailing.body_html = viewModel.exportHTML();
+          $scope.mailing.template_options = mailing.template_options || {};
           // Mosaico exports JSON. Keep their original encoding... or else the loader throws an error.
-          mailing.template_options.mosaicoMetadata = viewModel.exportMetadata();
-          mailing.template_options.mosaicoContent = viewModel.exportJSON();
+          $scope.mailing.template_options.mosaicoMetadata = viewModel.exportMetadata();
+          $scope.mailing.template_options.mosaicoContent = viewModel.exportJSON();
+          return $scope.save();
         }
 
         crmMosaicoIframe = new CrmMosaicoIframe({
@@ -83,6 +85,11 @@
               //$timeout(function(){$scope.save();}, 100);
               $timeout(myAutosave.save);
               crmMosaicoIframe.hide('crmMosaicoEditorDialog');
+            },
+            getmodel: function(ko, viewModel) {
+              viewModel.metadata.changed = Date.now();
+              syncModel(viewModel);
+              return viewModel;
             },
             test: function(ko, viewModel) {
               syncModel(viewModel);
@@ -102,6 +109,18 @@
 
         return crmStatus({start: ts('Loading...'), success: null}, crmMosaicoIframe.open());
       }
+    };
+    
+    // @return Promise
+    $scope.save = function save() {
+      return block(crmStatus(null,
+        crmMailingMgr
+          .save($scope.mailing)
+          .then(function() {
+            // pre-condition: the mailing exists *before* saving attachments to it
+            return $scope.attachments.save();
+          })
+      ));
     };
 
     // Open a dialog of advanced options.
@@ -138,20 +157,21 @@
     
     myAutosave = new CrmAutosaveCtrl({
         save: function() {
-          return block(crmStatus({start: ts('Saving...'), success: ts('Saveddd')}, $scope.mosaicoCtrl.syncModel($scope.mailing, $scope.viewModel)));
+          return block(crmStatus({start: ts('Saving template...'), success: ts('Saved')}, $scope.save()));
         },
         saveIf: function() {
           return true;
         },
         model: function() {
-          return [$scope.mailing, $scope.attachments.getAutosaveSignature()];
+          console.log(crmMosaicoIframe);
+          return crmMosaicoIframe ? crmMosaicoIframe.actions.getmodel() : crmMosaicoIframe;
         },
         form: function() {
           return $scope.crmMailing;
         }
     });
     $timeout(myAutosave.start);
-
+    $scope.$on('$destroy', myAutosave.stop);
   });
 
 })(angular, CRM.$, CRM._);
